@@ -3,6 +3,7 @@ package parser
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -1602,6 +1603,27 @@ func (p *Parser) getPlugin(namespace, name string) (kong.Plugin, error) {
 	if k8sPlugin.PluginName == "" {
 		return plugin, errors.Errorf("invalid empty 'plugin' property")
 	}
+	if k8sPlugin.ConfigFrom != (configurationv1.SecretValueFromSource{}) {
+		if len(k8sPlugin.Config) > 0 {
+			return plugin, errors.Errorf("plugin '%v/%v' has both Config and ConfigFrom set",
+				k8sPlugin.Namespace, k8sPlugin.Name)
+		}
+		selector := k8sPlugin.ConfigFrom.SecretKeyRef
+		secret, err := p.store.GetSecret(k8sPlugin.Namespace, k8sPlugin.ConfigFrom.SecretKeyRef.Name)
+		if err != nil {
+			return plugin, errors.Errorf("error fetching credential secret '%v/%v': %v",
+				k8sPlugin.Namespace, k8sPlugin.ConfigFrom.SecretKeyRef.Name, err)
+		}
+		secretVal, ok := secret.Data[k8sPlugin.ConfigFrom.SecretKeyRef.Key]
+		if !ok {
+			return plugin, errors.Errorf("no key '%v' in secret '%v/%v')",
+				k8sPlugin.ConfigFrom.SecretKeyRef.Key, k8sPlugin.Namespace, k8sPlugin.ConfigFrom.SecretKeyRef.Name)
+		}
+		var config configurationv1.Configuration
+		json.Unmarshal(secretVal, &config)
+		k8sPlugin.Config = config
+	}
+
 	plugin = kongPluginFromK8SPlugin(*k8sPlugin)
 	return plugin, nil
 }
@@ -1646,9 +1668,8 @@ func kongPluginFromK8SClusterPlugin(k8sPlugin configurationv1.KongClusterPlugin)
 
 func kongPluginFromK8SPlugin(k8sPlugin configurationv1.KongPlugin) kong.Plugin {
 	return toKongPlugin(plugin{
-		Name:   k8sPlugin.PluginName,
-		Config: k8sPlugin.Config,
-
+		Name:      k8sPlugin.PluginName,
+		Config:    k8sPlugin.Config,
 		RunOn:     k8sPlugin.RunOn,
 		Disabled:  k8sPlugin.Disabled,
 		Protocols: k8sPlugin.Protocols,

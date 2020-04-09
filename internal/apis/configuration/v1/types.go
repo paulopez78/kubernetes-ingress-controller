@@ -6,6 +6,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/hbagdi/go-kong/kong"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -57,6 +58,9 @@ type KongClusterPlugin struct {
 	// Config contains the plugin configuration.
 	Config Configuration `json:"config,omitempty"`
 
+	// ConfigFrom references a secret containing the plugin configuration.
+	ConfigFrom SecretValueFromSource `json:"configFrom,omitempty"`
+
 	// PluginName is the name of the plugin to which to apply the config
 	PluginName string `json:"plugin,omitempty"`
 
@@ -99,6 +103,9 @@ type KongPlugin struct {
 	// Config contains the plugin configuration.
 	Config Configuration `json:"config,omitempty"`
 
+	// ConfigFrom references a secret containing the plugin configuration.
+	ConfigFrom SecretValueFromSource `json:"configFrom,omitempty"`
+
 	// PluginName is the name of the plugin to which to apply the config
 	PluginName string `json:"plugin,omitempty"`
 
@@ -109,6 +116,12 @@ type KongPlugin struct {
 	// Protocols configures plugin to run on requests received on specific
 	// protocols.
 	Protocols []string `json:"protocols,omitempty"`
+}
+
+// SecretValueFromSource represents the source of a secret value
+type SecretValueFromSource struct {
+	// The Secret key to select from.
+	SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
 }
 
 // KongPluginList is a top-level list type. The client methods for lists are automatically created.

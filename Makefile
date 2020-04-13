@@ -46,3 +46,14 @@ container:
     --build-arg TAG=${TAG} --build-arg COMMIT=${COMMIT} \
     --build-arg REPO_INFO=${REPO_INFO} \
     -t ${IMAGE}:${TAG} .
+
+.PHONY: delve-container
+delve-container:
+	git clone https://github.com/go-delve/delve.git
+	docker build \
+    --build-arg TAG=${TAG} --build-arg COMMIT=${COMMIT} \
+    --build-arg REPO_INFO=${REPO_INFO} \
+	-f DelveDockerfile \
+    -t ${IMAGE}:${TAG} .
+	rm -rf ./delve
+

@@ -122,6 +122,8 @@ type KongPlugin struct {
 type SecretValueFromSource struct {
 	// The Secret key to select from.
 	SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
+	// An optional namespace containing the secret.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // KongPluginList is a top-level list type. The client methods for lists are automatically created.

@@ -109,6 +109,13 @@ spec:
           type: boolean
         config:
           type: object
+        configFrom:
+          type: object
+          properties:
+            secretKeyRef:
+              type: object
+            namespace:
+              type: string
         run_on:
           type: string
           enum:

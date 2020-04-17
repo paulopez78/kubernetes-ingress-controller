@@ -1591,6 +1591,16 @@ func (p *Parser) getPlugin(namespace, name string) (kong.Plugin, error) {
 			if clusterPlugin.PluginName == "" {
 				return plugin, errors.Errorf("invalid empty 'plugin' property")
 			}
+			if clusterPlugin.ConfigFrom != (configurationv1.SecretValueFromSource{}) {
+				if len(clusterPlugin.Config) > 0 {
+					return plugin, errors.Errorf("plugin '%v' has both Config and ConfigFrom set", k8sPlugin.Name)
+				}
+				config, err := p.secretToConfiguration(clusterPlugin.ConfigFrom)
+				if err != nil {
+					return plugin, err
+				}
+				clusterPlugin.Config = config
+			}
 			plugin = kongPluginFromK8SClusterPlugin(*clusterPlugin)
 			return plugin, err
 		}
@@ -1608,24 +1618,33 @@ func (p *Parser) getPlugin(namespace, name string) (kong.Plugin, error) {
 			return plugin, errors.Errorf("plugin '%v/%v' has both Config and ConfigFrom set",
 				k8sPlugin.Namespace, k8sPlugin.Name)
 		}
-		selector := k8sPlugin.ConfigFrom.SecretKeyRef
-		secret, err := p.store.GetSecret(k8sPlugin.Namespace, k8sPlugin.ConfigFrom.SecretKeyRef.Name)
+		namespacedConfigFrom := k8sPlugin.ConfigFrom
+		namespacedConfigFrom.Namespace = k8sPlugin.Namespace
+		config, err := p.secretToConfiguration(namespacedConfigFrom)
 		if err != nil {
-			return plugin, errors.Errorf("error fetching credential secret '%v/%v': %v",
-				k8sPlugin.Namespace, k8sPlugin.ConfigFrom.SecretKeyRef.Name, err)
+			return plugin, err
 		}
-		secretVal, ok := secret.Data[k8sPlugin.ConfigFrom.SecretKeyRef.Key]
-		if !ok {
-			return plugin, errors.Errorf("no key '%v' in secret '%v/%v')",
-				k8sPlugin.ConfigFrom.SecretKeyRef.Key, k8sPlugin.Namespace, k8sPlugin.ConfigFrom.SecretKeyRef.Name)
-		}
-		var config configurationv1.Configuration
-		json.Unmarshal(secretVal, &config)
 		k8sPlugin.Config = config
 	}
 
 	plugin = kongPluginFromK8SPlugin(*k8sPlugin)
 	return plugin, nil
+}
+
+func (p *Parser) secretToConfiguration(reference configurationv1.SecretValueFromSource) (configurationv1.Configuration, error) {
+	secret, err := p.store.GetSecret(reference.Namespace, reference.SecretKeyRef.Name)
+	if err != nil {
+		return configurationv1.Configuration{}, errors.Errorf("error fetching credential secret '%v/%v': %v",
+			reference.Namespace, reference.SecretKeyRef.Name, err)
+	}
+	secretVal, ok := secret.Data[reference.SecretKeyRef.Key]
+	if !ok {
+		return configurationv1.Configuration{}, errors.Errorf("no key '%v' in secret '%v/%v')",
+			reference.SecretKeyRef.Key, reference.Namespace, reference.SecretKeyRef.Name)
+	}
+	var config configurationv1.Configuration
+	json.Unmarshal(secretVal, &config)
+	return config, nil
 }
 
 // plugin is a intermediate type to hold plugin related configuration

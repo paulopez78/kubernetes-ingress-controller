@@ -1435,8 +1435,12 @@ func (p *Parser) globalPlugins() ([]Plugin, error) {
 			duplicates = append(duplicates, pluginName)
 			continue
 		}
-		res[pluginName] = Plugin{
-			Plugin: kongPluginFromK8SPlugin(k8sPlugin),
+		if plugin, err := p.kongPluginFromK8SPlugin(k8sPlugin); err == nil {
+			res[pluginName] = Plugin{
+				Plugin: plugin,
+			}
+		} else {
+			glog.Errorf("Failed to generate configuration for plugin %v: %v", pluginName, err)
 		}
 	}
 
@@ -1460,8 +1464,12 @@ func (p *Parser) globalPlugins() ([]Plugin, error) {
 			duplicates = append(duplicates, pluginName)
 			continue
 		}
-		res[pluginName] = Plugin{
-			Plugin: kongPluginFromK8SClusterPlugin(k8sPlugin),
+		if plugin, err := p.kongPluginFromK8SClusterPlugin(k8sPlugin); err == nil {
+			res[pluginName] = Plugin{
+				Plugin: plugin,
+			}
+		} else {
+			glog.Errorf("Failed to generate configuration for plugin %v: %v", pluginName, err)
 		}
 	}
 	for _, plugin := range duplicates {
@@ -1591,44 +1599,23 @@ func (p *Parser) getPlugin(namespace, name string) (kong.Plugin, error) {
 			if clusterPlugin.PluginName == "" {
 				return plugin, errors.Errorf("invalid empty 'plugin' property")
 			}
-			if clusterPlugin.ConfigFrom != (configurationv1.SecretValueFromSource{}) {
-				if len(clusterPlugin.Config) > 0 {
-					return plugin, errors.Errorf("plugin '%v' has both Config and ConfigFrom set", k8sPlugin.Name)
-				}
-				config, err := p.secretToConfiguration(clusterPlugin.ConfigFrom)
-				if err != nil {
-					return plugin, err
-				}
-				clusterPlugin.Config = config
+			if plugin, err := p.kongPluginFromK8SClusterPlugin(*clusterPlugin); err != nil {
+				return plugin, err
+			} else {
+				return plugin, nil
 			}
-			plugin = kongPluginFromK8SClusterPlugin(*clusterPlugin)
-			return plugin, err
-		}
-		// handle other errors
-		if err != nil {
-			return plugin, err
 		}
 	}
 	// ignore plugins with no name
 	if k8sPlugin.PluginName == "" {
 		return plugin, errors.Errorf("invalid empty 'plugin' property")
 	}
-	if k8sPlugin.ConfigFrom != (configurationv1.SecretValueFromSource{}) {
-		if len(k8sPlugin.Config) > 0 {
-			return plugin, errors.Errorf("plugin '%v/%v' has both Config and ConfigFrom set",
-				k8sPlugin.Namespace, k8sPlugin.Name)
-		}
-		namespacedConfigFrom := k8sPlugin.ConfigFrom
-		namespacedConfigFrom.Namespace = k8sPlugin.Namespace
-		config, err := p.secretToConfiguration(namespacedConfigFrom)
-		if err != nil {
-			return plugin, err
-		}
-		k8sPlugin.Config = config
-	}
 
-	plugin = kongPluginFromK8SPlugin(*k8sPlugin)
-	return plugin, nil
+	if plugin, err := p.kongPluginFromK8SPlugin(*k8sPlugin); err != nil {
+		return plugin, err
+	} else {
+		return plugin, nil
+	}
 }
 
 func (p *Parser) secretToConfiguration(reference configurationv1.SecretValueFromSource) (configurationv1.Configuration, error) {
@@ -1674,7 +1661,17 @@ func toKongPlugin(plugin plugin) kong.Plugin {
 	return result
 }
 
-func kongPluginFromK8SClusterPlugin(k8sPlugin configurationv1.KongClusterPlugin) kong.Plugin {
+func (p *Parser) kongPluginFromK8SClusterPlugin(k8sPlugin configurationv1.KongClusterPlugin) (kong.Plugin, error) {
+	var err error
+	if k8sPlugin.ConfigFrom != (configurationv1.SecretValueFromSource{}) {
+		if len(k8sPlugin.Config) > 0 {
+			err = errors.Errorf("plugin '%v' has both Config and ConfigFrom set", k8sPlugin.Name)
+		}
+		config, err := p.secretToConfiguration(k8sPlugin.ConfigFrom)
+		if err == nil {
+			k8sPlugin.Config = config
+		}
+	}
 	return toKongPlugin(plugin{
 		Name:   k8sPlugin.PluginName,
 		Config: k8sPlugin.Config,
@@ -1682,17 +1679,30 @@ func kongPluginFromK8SClusterPlugin(k8sPlugin configurationv1.KongClusterPlugin)
 		RunOn:     k8sPlugin.RunOn,
 		Disabled:  k8sPlugin.Disabled,
 		Protocols: k8sPlugin.Protocols,
-	})
+	}), err
 }
 
-func kongPluginFromK8SPlugin(k8sPlugin configurationv1.KongPlugin) kong.Plugin {
+func (p *Parser) kongPluginFromK8SPlugin(k8sPlugin configurationv1.KongPlugin) (kong.Plugin, error) {
+	var err error
+	if k8sPlugin.ConfigFrom != (configurationv1.SecretValueFromSource{}) {
+		if len(k8sPlugin.Config) > 0 {
+			err = errors.Errorf("plugin '%v/%v' has both Config and ConfigFrom set",
+				k8sPlugin.Namespace, k8sPlugin.Name)
+		} else {
+			namespacedConfigFrom := k8sPlugin.ConfigFrom
+			namespacedConfigFrom.Namespace = k8sPlugin.Namespace
+			config, configError := p.secretToConfiguration(namespacedConfigFrom)
+			err = configError
+			k8sPlugin.Config = config
+		}
+	}
 	return toKongPlugin(plugin{
 		Name:      k8sPlugin.PluginName,
 		Config:    k8sPlugin.Config,
 		RunOn:     k8sPlugin.RunOn,
 		Disabled:  k8sPlugin.Disabled,
 		Protocols: k8sPlugin.Protocols,
-	})
+	}), err
 }
 
 // getEndpoints returns a list of <endpoint ip>:<port> for a given service/target port combination.

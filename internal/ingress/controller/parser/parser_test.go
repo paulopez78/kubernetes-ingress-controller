@@ -134,6 +134,190 @@ func TestGlobalPlugin(t *testing.T) {
 	})
 }
 
+func TestSecretConfigurationPlugin(t *testing.T) {
+	jwtPluginConfig := "{\"run_on_preflight\": false}"
+	basicAuthPluginConfig := "{\"hide_credentials\": true}"
+	assert := assert.New(t)
+	t.Run("plugins with secret configuration are processed correctly", func(t *testing.T) {
+		store, err := store.NewFakeStore(store.FakeObjects{
+			Services: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:        "foo-svc",
+						Namespace:   "default",
+						Annotations: map[string]string{},
+					},
+				},
+			},
+			Ingresses: []*networking.Ingress{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "foo",
+						Namespace: "default",
+						Annotations: map[string]string{
+							"plugins.konghq.com": "foo-plugin",
+						},
+					},
+					Spec: networking.IngressSpec{
+						Rules: []networking.IngressRule{
+							{
+								Host: "example.com",
+								IngressRuleValue: networking.IngressRuleValue{
+									HTTP: &networking.HTTPIngressRuleValue{
+										Paths: []networking.HTTPIngressPath{
+											{
+												Path: "/",
+												Backend: networking.IngressBackend{
+													ServiceName: "foo-svc",
+													ServicePort: intstr.FromInt(80),
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "bar",
+						Namespace: "default",
+						Annotations: map[string]string{
+							"plugins.konghq.com": "bar-plugin",
+						},
+					},
+					Spec: networking.IngressSpec{
+						Rules: []networking.IngressRule{
+							{
+								Host: "example.net",
+								IngressRuleValue: networking.IngressRuleValue{
+									HTTP: &networking.HTTPIngressRuleValue{
+										Paths: []networking.HTTPIngressPath{
+											{
+												Path: "/",
+												Backend: networking.IngressBackend{
+													ServiceName: "foo-svc",
+													ServicePort: intstr.FromInt(80),
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			KongPlugins: []*configurationv1.KongPlugin{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "global-foo-plugin",
+						Namespace: "default",
+						Labels: map[string]string{
+							"global": "true",
+						},
+					},
+					PluginName: "jwt",
+					ConfigFrom: configurationv1.SecretValueFromSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							Key: "jwt-config",
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "conf-secret",
+							},
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "foo-plugin",
+						Namespace: "default",
+					},
+					PluginName: "jwt",
+					ConfigFrom: configurationv1.SecretValueFromSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							Key: "jwt-config",
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "conf-secret",
+							},
+						},
+					},
+				},
+			},
+			KongClusterPlugins: []*configurationv1.KongClusterPlugin{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "global-bar-plugin",
+						Labels: map[string]string{
+							"global": "true",
+						},
+					},
+					Protocols:  []string{"http"},
+					PluginName: "basic-auth",
+					ConfigFrom: configurationv1.SecretValueFromSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							Key: "basic-auth-config",
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "conf-secret",
+							},
+						},
+						Namespace: "default",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "bar-plugin",
+					},
+					Protocols:  []string{"http"},
+					PluginName: "basic-auth",
+					ConfigFrom: configurationv1.SecretValueFromSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							Key: "basic-auth-config",
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "conf-secret",
+							},
+						},
+						Namespace: "default",
+					},
+				},
+			},
+			Secrets: []*corev1.Secret{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						UID:       types.UID("7428fb98-180b-4702-a91f-61351a33c6e4"),
+						Name:      "conf-secret",
+						Namespace: "default",
+					},
+					Data: map[string][]byte{
+						"jwt-config":        []byte(jwtPluginConfig),
+						"basic-auth-config": []byte(basicAuthPluginConfig),
+					},
+				},
+			},
+		})
+		assert.Nil(err)
+		parser := New(store)
+		state, err := parser.Build()
+		assert.Nil(err)
+		assert.NotNil(state)
+		assert.Equal(4, len(state.Plugins),
+			"expected four plugins to be rendered")
+
+		sort.SliceStable(state.Plugins, func(i, j int) bool {
+			return strings.Compare(*state.Plugins[i].Name, *state.Plugins[j].Name) > 0
+		})
+		assert.Equal("jwt", *state.Plugins[0].Name)
+		assert.Equal(kong.Configuration{"run_on_preflight": false}, state.Plugins[0].Config)
+		assert.Equal("jwt", *state.Plugins[1].Name)
+		assert.Equal(kong.Configuration{"run_on_preflight": false}, state.Plugins[0].Config)
+
+		assert.Equal("basic-auth", *state.Plugins[2].Name)
+		assert.Equal(kong.Configuration{"hide_credentials": true}, state.Plugins[2].Config)
+		assert.Equal("basic-auth", *state.Plugins[3].Name)
+		assert.Equal(kong.Configuration{"hide_credentials": true}, state.Plugins[3].Config)
+	})
+}
+
 func TestServiceClientCertificate(t *testing.T) {
 	assert := assert.New(t)
 	t.Run("valid client-cert annotation", func(t *testing.T) {

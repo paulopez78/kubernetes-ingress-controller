@@ -1599,11 +1599,8 @@ func (p *Parser) getPlugin(namespace, name string) (kong.Plugin, error) {
 			if clusterPlugin.PluginName == "" {
 				return plugin, errors.Errorf("invalid empty 'plugin' property")
 			}
-			if plugin, err := p.kongPluginFromK8SClusterPlugin(*clusterPlugin); err != nil {
-				return plugin, err
-			} else {
-				return plugin, nil
-			}
+			plugin, err = p.kongPluginFromK8SClusterPlugin(*clusterPlugin)
+			return plugin, err
 		}
 	}
 	// ignore plugins with no name
@@ -1611,11 +1608,8 @@ func (p *Parser) getPlugin(namespace, name string) (kong.Plugin, error) {
 		return plugin, errors.Errorf("invalid empty 'plugin' property")
 	}
 
-	if plugin, err := p.kongPluginFromK8SPlugin(*k8sPlugin); err != nil {
-		return plugin, err
-	} else {
-		return plugin, nil
-	}
+	plugin, err = p.kongPluginFromK8SPlugin(*k8sPlugin)
+	return plugin, err
 }
 
 func (p *Parser) secretToConfiguration(reference configurationv1.SecretValueFromSource) (configurationv1.Configuration, error) {
